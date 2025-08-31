@@ -1,0 +1,17 @@
+{
+  "states": {
+    "default": "assets/扫地机器人.png",
+    "shache": "assets/brake.png",
+    "dash": "assets/dash.png",
+    "breath": "assets/breath.png",
+    "hug": "assets/hug.png",
+    "drink": "assets/drink.png",
+    "sleep": "assets/sleep.png",
+    "sleep2": "assets/sleep2.png",
+    "lift": "assets/lift.png",
+    "lift2": "assets/lift2.png",
+    "paperfly": "assets/paperfly.png"
+  },
+  "default_asset": "assets/扫地机器人.png"
+
+}
