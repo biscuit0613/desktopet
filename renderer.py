@@ -1,5 +1,5 @@
-import json
 import os
+import sys
 from PyQt5.QtGui import QMovie, QPixmap, QTransform
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtWidgets import QLabel
@@ -22,6 +22,9 @@ class Renderer:
         # 设置默认资源路径
         if asset_path is None:
             asset_path = self._default_asset
+        
+        # 获取正确的资源路径（支持PyInstaller打包后的环境）
+        asset_path = self._get_absolute_path(asset_path)
         
         # 兼容 GIF/PNG
         self._dir = 1  # 朝向：1 面向右，-1 面向左
@@ -64,6 +67,21 @@ class Renderer:
         self.base_size = size
         self.pet_widget.resize(size)
         self.label.resize(size)
+    
+    def _get_absolute_path(self, relative_path):
+        # """获取资源文件的绝对路径，支持PyInstaller打包后的环境"""
+        # 原始的相对路径处理方式（注释掉，保留用于调试）
+        # return relative_path
+        
+        try:
+            # PyInstaller会创建一个临时文件夹，并把路径存储在_MEIPASS中
+            base_path = sys._MEIPASS
+        except Exception:
+            # 如果不是PyInstaller打包的环境，则使用当前工作目录
+            base_path = os.path.abspath("..")
+        
+        # 确保路径格式正确（处理Windows路径）
+        return os.path.join(base_path, relative_path).replace("/", os.path.sep)
     
     def _load_assets_from_config(self):
         """从配置文件加载图片资源路径"""
@@ -113,6 +131,12 @@ class Renderer:
         
         self.current_state = state_name  # 更新当前状态
         new_asset_path = self._states[state_name]
+        
+        # 原始的路径访问方式（注释掉，保留用于调试）
+        # original_new_asset_path = new_asset_path
+        
+        # 获取正确的资源路径（支持PyInstaller打包后的环境）
+        new_asset_path = self._get_absolute_path(new_asset_path)
         
         # 停止之前的动画（如果有）
         if hasattr(self, 'movie') and self.movie:

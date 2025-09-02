@@ -140,6 +140,10 @@ class DialogManager:
         self.idle_tracker = IdleTimeTracker()
         self.idle_tracker.set_threshold(40)  # 设置40秒的空闲阈值
         
+        # 初始化互动计数和最近互动时间
+        self.interaction_count = 0
+        self.last_interaction_time = 0
+        
         # 启动自动触发检查定时器
         self.check_timer = QTimer(self.pet)
         self.check_timer.setInterval(1000)  # 每秒检查一次
@@ -274,13 +278,17 @@ class DialogManager:
                 self.show_dialog(dialog_type="bored")
     
     def register_interaction(self):
-        """注册用户交互事件"""
-        self.state_tracker["interacted"] = True
-        self.idle_tracker.reset()  # 重置空闲时间
-        
-        # 有交互后可以显示开心或打招呼的对话框
-        if random.random() < 0.1:  # 10%的概率
-            self.show_dialog(dialog_type=random.choice["happy","greeting"])
+        """记录与用户的互动"""
+        # 增加用户互动计数
+        self.interaction_count += 1
+        # 更新最近互动时间
+        self.last_interaction_time = time.time()
+        if self.interaction_count %5:
+            if random.randint(0,100) < 30:
+                self.show_dialog(dialog_type="greeting")
+        else:
+            if random.randint(0,100) < 15:
+                self.show_dialog(dialog_type="happy")
     
     def add_dialogue(self, dialog_type, texts):
         """添加新的对话框类型和内容"""
