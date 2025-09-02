@@ -1,6 +1,6 @@
-import sys
 import random
 import time
+import math
 from PyQt5.QtWidgets import QMenu
 from PyQt5.QtGui import QCursor
 from PyQt5.QtCore import Qt, QTimer
@@ -8,11 +8,18 @@ from PyQt5.QtCore import Qt, QTimer
 class BehaviorController:
     def __init__(self, pet):
         self.pet = pet
-        
         # 拖动相关
         self._drag_offset = None
         self._is_dragging = False
         self._drag_history = []  # [(x, y, t), ...]
+
+        self._swing_angle = 0
+        self._swing_speed = 0
+        self._swing_damping = 0.90  # 降低阻尼系数，使摆动更持久
+        self._max_swing_angle = 25  # 增加最大晃动角度
+        self._mouse_velocity = [0, 0]  # 鼠标速度 [vx, vy]
+        self._prev_mouse_pos = None  # 上一帧鼠标位置
+        self._prev_time = time.time()  # 上一帧时间
     
     @property
     def is_dragging(self):
@@ -31,7 +38,39 @@ class BehaviorController:
     
     def on_mouse_move(self, event):
         """处理鼠标移动事件"""
-        if event.buttons() & Qt.LeftButton and self._drag_offset is not None:
+        current_time = time.time()
+        dt = current_time - self._prev_time
+        # 检查是否处于lift状态，如果是，则跟随鼠标并添加晃动效果
+        if hasattr(self.pet, 'is_in_lift_state') and self.pet.is_in_lift_state:
+            current_mouse_pos = (event.globalX(), event.globalY())
+            
+            # 计算鼠标速度
+            if self._prev_mouse_pos and dt > 0:
+                dx = current_mouse_pos[0] - self._prev_mouse_pos[0]
+                self._mouse_velocity[0] = dx / dt  # 水平速度
+            
+            # 更新摆动物理
+            self._update_swing(dt)
+            
+            # 计算摆动位移
+            swing_offset_x = math.sin(math.radians(self._swing_angle)) * 30  # 增加摆动幅度的乘数，从15增加到30
+            
+            # 计算目标位置，考虑摆动偏移
+            target_x = int(event.globalX() - self.pet.width() // 2 + swing_offset_x)
+            target_y = int(event.globalY() - self.pet.height() // 3)
+            
+            self.pet.move(target_x, target_y)
+            
+            # 更新朝向（根据摆动方向）
+            if self._swing_angle > 0:
+                self.pet.renderer.face_right(False)
+            elif self._swing_angle < 0:
+                self.pet.renderer.face_left(False)
+            
+            # 保存当前鼠标位置和时间
+            self._prev_mouse_pos = current_mouse_pos
+            self._prev_time = current_time
+        elif event.buttons() & Qt.LeftButton and self._drag_offset is not None:
             self.pet.move(event.globalPos() - self._drag_offset)
             # 记录轨迹（限制长度与时间窗口）
             now = time.monotonic()
@@ -40,6 +79,34 @@ class BehaviorController:
             cutoff = now - 0.2
             while len(self._drag_history) > 0 and self._drag_history[0][2] < cutoff:
                 self._drag_history.pop(0)
+        else:
+            # 不在lift状态且未拖动时，重置摆动相关变量
+            self._prev_mouse_pos = None
+            self._swing_angle = 0
+            self._swing_speed = 0
+    
+    def _update_swing(self, dt):
+        """更新摆动物理状态"""
+        # 根据鼠标水平速度影响摆动
+        mouse_influence = self._mouse_velocity[0] * 0.15  # 增加鼠标速度对摆动的影响系数
+        
+        # 计算恢复力（让摆动回到中心位置的力）
+        restoring_force = -self._swing_angle * 0.05  # 减小恢复力，使摆动更缓慢地回到中心
+        
+        # 更新摆动速度
+        self._swing_speed += (mouse_influence + restoring_force) * dt
+        
+        # 应用阻尼
+        self._swing_speed *= self._swing_damping
+        
+        # 更新摆动角度
+        self._swing_angle += self._swing_speed
+        
+        # 限制最大角度
+        self._swing_angle = max(-self._max_swing_angle, min(self._max_swing_angle, self._swing_angle))
+        
+        # 逐渐减小鼠标速度影响（摩擦）
+        self._mouse_velocity[0] *= 0.8  # 减小摩擦系数，使鼠标速度影响更持久
     
     def on_mouse_release(self, event):
         """处理鼠标释放事件"""

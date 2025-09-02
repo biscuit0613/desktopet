@@ -1,3 +1,8 @@
 assets/*
 pycache/
 *.pyc
+build/
+dist/
+desktopPet.spec
+dialogs.json
+pic_assets.json

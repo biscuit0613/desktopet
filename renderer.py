@@ -3,6 +3,7 @@ import os
 from PyQt5.QtGui import QMovie, QPixmap, QTransform
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtWidgets import QLabel
+import json
 
 class Renderer:
     def __init__(self, pet_widget, asset_path=None, max_width=None, max_height=None):
@@ -27,6 +28,7 @@ class Renderer:
         self.asset_path = asset_path
         self._is_movie = asset_path.lower().endswith(".gif")
         self.current_state = "default"  # 跟踪当前状态
+        self.current_scale = 1.0  # 缓存当前缩放比例
         
         # 加载资源并设置初始尺寸
         if self._is_movie:
@@ -106,12 +108,10 @@ class Renderer:
     
     def _switch_to_state_image(self, state_name):
         """根据状态名称切换图像资源"""
-        if state_name in self._states:
-            self.asset_path = self._states[state_name]
-            self.current_state = state_name  # 更新当前状态
         if state_name not in self._states:
             return False
         
+        self.current_state = state_name  # 更新当前状态
         new_asset_path = self._states[state_name]
         
         # 停止之前的动画（如果有）
@@ -124,26 +124,47 @@ class Renderer:
         self.asset_path = new_asset_path
         self._is_movie = new_asset_path.lower().endswith(".gif")
         
+        # 为不同状态设置不同的缩放系数
+        scale_factors = {
+            "sleep": (1.0, 1.0),  # 宽度和高度的缩放系数
+            "default": (1.0, 1.0),
+            "shache": (1.0, 1.0)
+            # 可以根据需要为其他状态添加缩放系数
+        }
+        
+        # 获取当前状态的缩放系数，如果没有则使用默认值
+        scale_x, scale_y = scale_factors.get(state_name, (1.0, 1.0))
+        
+        # 应用缩放系数到统一的基准尺寸，并考虑当前缓存的缩放比例
+        target = QSize(
+            int(self.base_size.width() * scale_x * self.current_scale), 
+            int(self.base_size.height() * scale_y * self.current_scale)
+        )
+        
         # 加载新的资源
         if self._is_movie:
             self.movie = QMovie(new_asset_path)
-            # 初始原始尺寸
-            base_size = self.movie.frameRect().size()
-            # 计算目标尺寸
-            target = QSize(self.base_size.width(), self.base_size.height())
-            new_size = base_size.scaled(target, Qt.KeepAspectRatio)
+            
+            # 应用统一基准尺寸的缩放和缓存的缩放比例
+            new_size = self.movie.frameRect().size().scaled(target, Qt.KeepAspectRatio)
             self.movie.setScaledSize(new_size)
             # 连接信号并启动动画
             self.movie.frameChanged.connect(self._on_movie_frame)
             self.movie.start()
         else:
             self.pixmap = QPixmap(new_asset_path)
-            # 缩放到当前尺寸
-            target = QSize(self.base_size.width(), self.base_size.height())
+            
+            # 应用统一基准尺寸的缩放和缓存的缩放比例
             scaled_pixmap = self.pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self._base_pixmap = scaled_pixmap
+            new_size = scaled_pixmap.size()
+            
             # 刷新显示
             self._refresh_label_pixmap()
+        
+        # 调整窗口与标签大小，保持统一
+        self.pet_widget.resize(target)
+        self.label.resize(target)
         
         return True
 
@@ -231,6 +252,9 @@ class Renderer:
         """应用缩放"""
         # 限制缩放范围
         scale_factor = max(min_scale, min(scale_factor, max_scale))
+        
+        # 更新缓存的缩放比例
+        self.current_scale = scale_factor
         
         if self._is_movie:
             w = max(1, int(self.base_size.width() * scale_factor))

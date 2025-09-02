@@ -2,6 +2,7 @@ import sys
 import random
 import json
 import os
+import time
 from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import Qt, QTimer
 
@@ -11,6 +12,7 @@ from speed_control import SpeedController
 from renderer import Renderer
 from behavior import BehaviorController
 from dialog import DialogManager
+from util import IdleTimeTracker
 
 class DesktopPet(QWidget):
     def __init__(self, asset_path=None, max_width=None, max_height=None,
@@ -35,11 +37,24 @@ class DesktopPet(QWidget):
         # 加载保存的设置
         self._load_settings()
         
-        # 简单的刹车状态计时器
+        # 刹车状态计时器
         self._shache_timer = QTimer(self)
         self._shache_timer.setSingleShot(True)
         self._shache_timer.timeout.connect(lambda: self.renderer._switch_to_state_image("default"))
         
+        # 空闲时间跟踪器，用于图片切换
+        self.idle_tracker = IdleTimeTracker()
+        self.idle_tracker.set_threshold(40)  # 设置40秒的空闲阈值
+        self.is_currently_sleeping = False  # 跟踪当前是否处于睡眠状态
+        
+        # 左键点击计数器，用于2次点击切换到lift状态
+        self.left_click_count = 0
+        self.last_click_time = 0  # 记录上次点击时间，用于判断点击间隔
+        self.is_in_lift_state = False  # 跟踪当前是否处于被拎起状态
+        
+        # 总点击次数计数器，用于计算所有左键点击次数
+        self.total_click_count = 0
+
         # 定时器 - 物理系统更新
         self._walk_timer = QTimer(self)
         self._walk_timer.setInterval(16)  # ~60 FPS
@@ -150,15 +165,37 @@ class DesktopPet(QWidget):
         current_speed_px_per_sec = abs(self.physics_system.vx) * 1000.0 / interval_ms
         current_speed_py_per_sec = abs(self.physics_system.vy) * 1000.0 / interval_ms
         
+        # 检查是否真的处于空闲状态（在地面上并且速度小于100）
+        is_actually_idle = (self.physics_system.on_ground and 
+                          abs(self.physics_system.vx) < 100 and 
+                          abs(self.physics_system.vy) < 100)
+        
+        # 更新空闲时间状态
+        entered_idle, exited_idle = self.idle_tracker.update(is_actually_idle)
+        
+        # 处理速度相关的图片切换（刹车状态）
         if current_speed_px_per_sec > 200 or current_speed_py_per_sec > 200:
             # 速度大于200时，立即切换到刹车图像并重置计时器
             self.renderer._switch_to_state_image("shache")
+            self.is_currently_sleeping = False  # 刹车时不睡觉
             if self._shache_timer.isActive():
                 self._shache_timer.stop()
         else:
             # 速度低于200时，如果计时器未启动，则启动3秒延时
             if not self._shache_timer.isActive() and self.renderer.current_state == "shache":
                 self._shache_timer.start(1500)  # 单位ms
+                
+        # 处理空闲状态的图片切换（睡眠状态）（睡眠状态下的对话框放在dialog.py中,和idle一起实现）
+        # 如果进入空闲状态，切换到sleep图片
+        if entered_idle and not self.is_currently_sleeping:
+            if random.randint(0, 100) < 30: # 30%的概率进入睡眠状态
+            # 随机选择sleep或sleep2图片
+                sleep_state = random.choice(["sleep", "sleep2"])
+                self.renderer._switch_to_state_image(sleep_state)
+                self.is_currently_sleeping = True
+        # 如果离开空闲状态且处于睡眠状态，只更新状态标记（实际切换逻辑已移至register_interaction）
+        elif exited_idle and self.is_currently_sleeping:
+            self.is_currently_sleeping = False
         
         # 更新物理状态
         self.physics_system.update(dt, interval_ms)
@@ -168,13 +205,45 @@ class DesktopPet(QWidget):
             # 从dialogues_move中选择fly类型的对话并显示
             if hasattr(self.dialog_manager, 'dialogues_move') and 'fly' in self.dialog_manager.dialogues_move:
                 fly_dialogues = self.dialog_manager.dialogues_move['fly']
-                if fly_dialogues:
+                if fly_dialogues and random.randint(0, 100) < 10:
                     text = random.choice(fly_dialogues)
                     self.dialog_manager.show_dialog(text=text, timeout=3000, typing_speed=50)
     
     # ===== 事件处理 =====
     def mousePressEvent(self, event):
         """处理鼠标按下事件"""
+        if event.button() == Qt.LeftButton:
+            # # 2次左键点击切换到lift状态的逻辑
+            # current_time = time.time()
+            
+            # # 如果点击间隔超过1秒，重置计数器
+            # if current_time - self.last_click_time > 1.0:
+            #     self.left_click_count = 0
+            
+            # self.left_click_count += 1
+            # self.last_click_time = current_time
+            
+            # # 2次点击切换到lift状态
+            # if self.left_click_count >= 2:
+            #     self.switch_to_lift_state()
+            #     self.left_click_count = 0  # 重置计数器
+            # else:
+                # 普通点击行为
+                self.register_interaction()
+                
+                # 计算总点击次数，不同的次数对应不同的语音
+                self.total_click_count += 1
+                if self.total_click_count == 10:
+                    self.show_dialog(dialog_type="10clicks")
+                if self.total_click_count == 25:
+                    self.show_dialog(dialog_type="25clicks")
+                if self.total_click_count == 50:
+                    self.show_dialog(dialog_type="50clicks")
+                if self.total_click_count == 75:
+                    self.show_dialog(dialog_type="75clicks")
+                if self.total_click_count >= 100:
+                    self.total_click_count = 0
+
         self.behavior_controller.on_mouse_press(event)
     
     def mouseMoveEvent(self, event):
@@ -206,12 +275,16 @@ class DesktopPet(QWidget):
         self._stick_to_ground()
     
     # 运动相关
-    def start_walk(self, speed_px_per_sec=120):
+    def start_walk(self, speed_px_per_sec=random.randint(120, 180),dir=random.choice([1,-1])):
         """开始行走"""
         interval_ms = max(1, self._walk_timer.interval())
-        self.speed_controller.start_walk(speed_px_per_sec, interval_ms)
+        self.speed_controller.start_walk(speed_px_per_sec*dir, interval_ms)
         self._stick_to_ground()
-    
+        if dir == 1:
+            self.face_right()
+        else:
+            self.face_left()
+
     def stop_walk(self):
         """停止行走"""
         self.speed_controller.stop_walk()
@@ -246,6 +319,50 @@ class DesktopPet(QWidget):
         """显示一个随机对话框"""
         self.dialog_manager.show_random_dialog()
     
+    def switch_to_lift_state(self):
+        """切换到被拎起状态"""
+        # 切换到lift状态图片
+        self.renderer._switch_to_state_image("lift")
+        self.is_in_lift_state = True
+        self.is_currently_sleeping = False
+        
+        # 更新物理状态
+        self.physics_system.on_ground = False
+        self.physics_system.vx = 0
+        self.physics_system.vy = 0
+        
+        # 停止行走
+        self.stop_walk()
+        
+        # 重置空闲时间
+        self.idle_tracker.reset()
+    
     def register_interaction(self):
         """注册用户交互"""
         self.dialog_manager.register_interaction()
+        
+        # 用户交互时，重置空闲时间
+        self.idle_tracker.reset()
+        
+        # 用户交互时，如果当前处于睡眠状态，执行跳跃并切换图片
+        if self.is_currently_sleeping:
+            self.physics_system.on_ground = True
+            self.physics_system.vx = 0
+            self.physics_system.vy = 0
+            self.behavior_controller._drag_offset = None
+            self.renderer._switch_to_state_image("lift2")  # 先切换到lift2状态
+            self.is_currently_sleeping = False  
+            # self.physics_system.jump()
+            # 先不急着实现jump,不知道为啥这个方法没效果，到时候试试单独实现。
+            # 添加等待时间，使用QTimer.singleShot实现延迟切换到default
+            QTimer.singleShot(2000, lambda: self.renderer._switch_to_state_image("default"))  # 2000毫秒
+        
+        # 用户交互时，如果当前在lift状态，切换回default状态
+        elif self.is_in_lift_state:
+            self.renderer._switch_to_state_image("default")
+            self.is_in_lift_state = False
+            # 恢复物理状态
+            self.physics_system.on_ground = True
+            self.physics_system.vx = 0
+            self.physics_system.vy = 0
+            self.behavior_controller._drag_offset = None

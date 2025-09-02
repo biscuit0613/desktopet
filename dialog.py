@@ -6,6 +6,7 @@ from PyQt5.QtGui import QFont, QColor, QPainter, QBrush, QPen
 import random
 import json
 import os
+from util import IdleTimeTracker
 
 class SpeechBubble(QDialog):
     """自定义对话框气泡组件，支持打字效果"""
@@ -117,10 +118,7 @@ class DialogManager:
         
         # 默认对话框内容库（作为备选）
         self.default_dialogues = {
-            "greeting": ["你好呀！", "嗨，很高兴见到你！", "今天过得怎么样？"],
-            "bored": ["有点无聊呢...", "来陪我玩吧！", "好想出去走走~"],
-            "happy": ["真开心！", "今天心情真好！", "谢谢陪我玩！"],
-            "tired": ["好累呀...", "我需要休息一下。", "能让我小睡一会吗？"]
+              
         }
         # 从配置文件加载对话文本
         self.dialogues = {}
@@ -128,17 +126,19 @@ class DialogManager:
         self._load_dialogues_from_config()
         # 自动触发相关设置
         self.auto_trigger_enabled = True
-        self.min_interval = 30  # 最小间隔（秒）
-        self.max_interval = 120  # 最大间隔（秒）
+        self.min_interval = 15  # 最小间隔（秒）
+        self.max_interval = 30  # 最大间隔（秒）
         self.last_trigger_time = 0
         self.time_to_next_trigger = random.uniform(self.min_interval, self.max_interval)
         
         # 状态追踪
         self.state_tracker = {
-            "idle_time": 0,
             "interacted": False,
             "moved_recently": False
         }
+        # 使用IdleTimeTracker管理空闲时间
+        self.idle_tracker = IdleTimeTracker()
+        self.idle_tracker.set_threshold(40)  # 设置40秒的空闲阈值
         
         # 启动自动触发检查定时器
         self.check_timer = QTimer(self.pet)
@@ -171,6 +171,11 @@ class DialogManager:
                     # 如果配置中没有动作对话，使用默认值
                     self.dialogues_move = self.default_dialogues.copy()
                     
+                if 'dialogues_sleep' in config:
+                    self.dialogues_sleep = config['dialogues_sleep']
+                else:
+                    # 如果配置中没有睡觉对话，使用默认值
+                    self.dialogues_sleep = self.default_dialogues.copy()
             else:
                 # 配置文件不存在，使用默认对话
                 self.dialogues = self.default_dialogues.copy()
@@ -192,6 +197,7 @@ class DialogManager:
     
     def show_dialog(self, text=None, dialog_type=None, timeout=3000, typing_speed=30):
         """显示一个对话框"""
+        
         # 如果没有指定文本，根据类型选择一个
         if text is None:
             if dialog_type and dialog_type in self.dialogues:
@@ -221,8 +227,27 @@ class DialogManager:
     
     def show_random_dialog(self):
         """显示一个随机对话框"""
+        # 检查宠物是否处于睡眠状态，如果是则不显示对话框
+        if hasattr(self.pet, 'is_currently_sleeping') and self.pet.is_currently_sleeping:
+            return None
         self.show_dialog()
     
+    def show_jump_dialog(self):
+        """显示一个跳跃相关的对话框"""
+        # 从self.dialogues_move属性获取跳跃对话（而不是从self.dialogues中获取）
+        if hasattr(self, 'dialogues_move') and self.dialogues_move and 'jump' in self.dialogues_move:
+            text = random.choice(self.dialogues_move['jump'])
+            self.show_dialog(text=text, timeout=3000, typing_speed=50)
+
+    def show_sleep_dialog(self):
+        """显示一个睡觉相关的对话框"""
+        # 检查宠物是否处于睡眠状态，如果是则显示睡觉对话框
+        if hasattr(self.pet, 'is_currently_sleeping') and self.pet.is_currently_sleeping:
+            # 从self.dialogues_sleep属性获取睡眠对话（而不是从self.dialogues中获取）
+            if hasattr(self, 'dialogues_sleep') and self.dialogues_sleep and 'sleep' in self.dialogues_sleep:
+                text = random.choice(self.dialogues_sleep['sleep'])
+                self.show_dialog(text=text, timeout=5000, typing_speed=50)
+
     def _check_auto_trigger_conditions(self):
         """检查是否满足自动触发对话框的条件"""
         if not self.auto_trigger_enabled:
@@ -233,35 +258,29 @@ class DialogManager:
         if current_time - self.last_trigger_time < self.time_to_next_trigger:
             return
         
-        # 这里可以添加更多条件判断，例如：
-        # 1. 桌宠是否处于空闲状态
-        # 2. 用户是否很久没有交互
-        # 3. 特定的物理状态（如静止、跳跃后等）
+        # 桌宠在地面上并且静止不动
+        is_actually_idle = (self.pet.physics_system.on_ground and 
+                           abs(self.pet.physics_system.vx) < 50 and 
+                           abs(self.pet.physics_system.vy) < 50)
         
-        # 示例条件：桌宠在地面上并且静止不动
-        if (self.pet.physics_system.on_ground and 
-            abs(self.pet.physics_system.vx) < 1 and 
-            abs(self.pet.physics_system.vy) < 1):
-            
-            # 增加空闲时间计数
-            self.state_tracker["idle_time"] += 1
-            
-            # 如果空闲时间超过一定值，显示无聊相关的对话框
-            if self.state_tracker["idle_time"] > 60:  # 60秒
+        # 更新空闲时间状态
+        entered_idle, exited_idle = self.idle_tracker.update(is_actually_idle)
+        
+        # 如果进入空闲状态，显示无聊相关的对话框（睡觉状态下依然在计时，所以把睡觉对话框也放到这里）
+        if entered_idle:
+            if hasattr(self.pet, 'is_currently_sleeping') and self.pet.is_currently_sleeping:
+                self.show_sleep_dialog()
+            else:
                 self.show_dialog(dialog_type="bored")
-                self.state_tracker["idle_time"] = 0
-        else:
-            # 桌宠在移动，重置空闲时间
-            self.state_tracker["idle_time"] = 0
     
     def register_interaction(self):
         """注册用户交互事件"""
         self.state_tracker["interacted"] = True
-        self.state_tracker["idle_time"] = 0
+        self.idle_tracker.reset()  # 重置空闲时间
         
-        # 有交互后可以显示开心的对话框
+        # 有交互后可以显示开心或打招呼的对话框
         if random.random() < 0.1:  # 10%的概率
-            self.show_dialog(dialog_type="happy")
+            self.show_dialog(dialog_type=random.choice["happy","greeting"])
     
     def add_dialogue(self, dialog_type, texts):
         """添加新的对话框类型和内容"""

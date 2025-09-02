@@ -1,15 +1,16 @@
 import random
+import dialog
 from PyQt5.QtCore import Qt
 
 class PhysicsSystem:
     def __init__(self, pet):
         self.pet = pet
         
+        self.dialog_manager = dialog.DialogManager(self.pet)
         # 物理参数
         self._vx = 0  # 像素/帧
         self._vy = 0.0  # 像素/秒
         self._gravity_px_per_sec2 = 2000.0  # 重力加速度
-        self._jump_speed_px_per_sec = random.randint(700, 1800)  # 起跳初速度
         
         # 反弹参数
         self._bounce_min = 1
@@ -18,7 +19,7 @@ class PhysicsSystem:
         self._remaining_bounces = 0
         self._on_ground = False
         self._air_grace_time = 0.0  # 抛掷后短暂忽略地面碰撞
-        
+    
     @property
     def vx(self):
         return self._vx
@@ -38,6 +39,10 @@ class PhysicsSystem:
     @property
     def on_ground(self):
         return self._on_ground
+        
+    @on_ground.setter
+    def on_ground(self, value):
+        self._on_ground = value
     
     def update(self, dt, interval_ms):
         """更新物理状态"""
@@ -102,10 +107,13 @@ class PhysicsSystem:
     
     def jump(self):
         """执行跳跃动作"""
-        if self.pet.y() >= self.pet._ground_y() and self._vy == 0.0:
-            self._vy = -self._jump_speed_px_per_sec
+        # if self.pet.y() >= self.pet._ground_y() and self._vy == 0.0:
+        if self._vy == 0.0:
+            jump_speed = -random.randint(700, 1800)
+            self._vy = jump_speed
             self._remaining_bounces = 0
             self._on_ground = False
+            self.dialog_manager.show_jump_dialog()
     
     def set_air_grace_time(self, time):
         """设置空中宽限时间"""
